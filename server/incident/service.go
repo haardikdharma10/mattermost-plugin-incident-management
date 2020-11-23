@@ -290,7 +290,19 @@ func (s *ServiceImpl) OpenUpdateStatusDialog(incidentID string, triggerID string
 		return ErrIncidentNotActive
 	}
 
-	dialog, err := s.newUpdateIncidentDialog()
+	message := ""
+	newestPostID := findNewestNonDeletedPostID(currentIncident.StatusPosts)
+	if newestPostID != "" {
+		var post *model.Post
+		post, err = s.pluginAPI.Post.GetPost(newestPostID)
+		if err != nil {
+			return errors.Wrap(err, "failed to find newest post")
+		}
+		message = post.Message
+	}
+	// TODO: if there is no newestPost, use the message template: https://mattermost.atlassian.net/browse/MM-30519
+
+	dialog, err := s.newUpdateIncidentDialog(message)
 	if err != nil {
 		return errors.Wrap(err, "failed to create update status dialog")
 	}
@@ -1005,7 +1017,7 @@ func (s *ServiceImpl) newIncidentDialog(teamID, commanderID, postID, clientID st
 	}, nil
 }
 
-func (s *ServiceImpl) newUpdateIncidentDialog() (*model.Dialog, error) {
+func (s *ServiceImpl) newUpdateIncidentDialog(message string) (*model.Dialog, error) {
 	return &model.Dialog{
 		Title:            "Update Incident Status",
 		IntroductionText: "Update your incident status and broadcast it to another channel.",
@@ -1014,7 +1026,7 @@ func (s *ServiceImpl) newUpdateIncidentDialog() (*model.Dialog, error) {
 				DisplayName: "Message",
 				Name:        DialogFieldMessageKey,
 				Type:        "textarea",
-				// TODO: default should be trimmed previous update, https://mattermost.atlassian.net/browse/MM-30206
+				Default:     message,
 			},
 			{
 				DisplayName: "Reminder for next update",
@@ -1089,4 +1101,17 @@ func addRandomBits(name string) string {
 	}
 	randBits := model.NewId()
 	return fmt.Sprintf("%s-%s", name, randBits[:4])
+}
+
+func findNewestNonDeletedPostID(posts []StatusPost) string {
+	var newest *StatusPost
+	for i, p := range posts {
+		if newest == nil || p.DeleteAt == 0 && p.CreateAt > newest.CreateAt {
+			newest = &posts[i]
+		}
+	}
+	if newest == nil {
+		return ""
+	}
+	return newest.ID
 }
